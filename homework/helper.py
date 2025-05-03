@@ -147,8 +147,8 @@ def epipolarMatchGUI(I1, I2, F):
         l = F.dot(v)
         s = np.sqrt(l[0] ** 2 + l[1] ** 2)
 
-        if s == 0:
-            error("Zero line vector in displayEpipolar")
+        # if s == 0:
+        #     error("Zero line vector in displayEpipolar")
 
         l = l / s
 

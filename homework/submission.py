@@ -124,7 +124,6 @@ def eightpoint(pts1, pts2, M):
     U, S, Vt = np.linalg.svd(F_normalized)
     S[-1] = 0
     F_normalized = U @ np.diag(S) @ Vt
-    # F_normalized = refineF(F_normalized, pts1 / M, pts2 / M)
     F = T.T @ F_normalized @ T
     return F
 
@@ -140,7 +139,8 @@ Q2.3.1: Compute the essential matrix E.
 
 def essentialMatrix(F, K1, K2):
     # Replace pass by your implementation
-    pass
+    E = K2.T @ F @ K1
+    return E
 
 
 """
@@ -156,7 +156,37 @@ Q2.3.2: Triangulate a set of 2D coordinates in the image to a set of 3D points.
 
 def triangulate(C1, pts1, C2, pts2):
     # Replace pass by your implementation
-    pass
+    N = pts1.shape[0]
+    P = np.zeros((N, 3))
+
+    err = 0.0
+
+    for i in range(N):
+        A = np.zeros((4, 4))
+
+        p1 = np.array([pts1[i][0], pts1[i][1], 1])
+        p2 = np.array([pts2[i][0], pts2[i][1], 1])
+
+        A[0] = p1[0] * C1[2] - C1[0]
+        A[1] = p1[1] * C1[2] - C1[1]
+        A[2] = p2[0] * C2[2] - C2[0]
+        A[3] = p2[1] * C2[2] - C2[1]
+
+        _, _, Vt = np.linalg.svd(A)
+        Pi = Vt[-1]
+        Pi = Pi / Pi[3]
+        P[i] = Pi[:3]
+
+        # Reprojection error
+        p1_hat = C1 @ Pi
+        p1_hat = p1_hat / p1_hat[2]
+        p2_hat = C2 @ Pi
+        p2_hat = p2_hat / p2_hat[2]
+
+        err += np.linalg.norm(p1_hat[:2] - p1[:2], cv2.NORM_L2) + np.linalg.norm(
+            p2_hat[:2] - p2[:2], cv2.NORM_L2
+        )
+    return P, err
 
 
 """
@@ -172,9 +202,103 @@ Q2.4.1: 3D visualization of the temple images.
 """
 
 
+def sim(im1, im2, x1, y1, x2, y2, window_size):
+    # Replace pass by your implementation
+    sigma = window_size / 4
+
+    half_w = window_size // 2
+    x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
+
+    y1_start = max(0, y1 - half_w)
+    y1_end = min(im1.shape[0], y1 + half_w + 1)
+    x1_start = max(0, x1 - half_w)
+    x1_end = min(im1.shape[1], x1 + half_w + 1)
+
+    y2_start = max(0, y2 - half_w)
+    y2_end = min(im2.shape[0], y2 + half_w + 1)
+    x2_start = max(0, x2 - half_w)
+    x2_end = min(im2.shape[1], x2 + half_w + 1)
+
+    # Adjust boundaries to ensure same size
+    y_start = max(y1_start, y2_start)
+    y_end = min(y1_end, y2_end)
+    x_start = max(x1_start, x2_start)
+    x_end = min(x1_end, x2_end)
+
+    w1 = im1[y_start:y_end, x_start:x_end].astype(np.float32)
+    w2 = im2[y_start:y_end, x_start:x_end].astype(np.float32)
+
+    gaussian_kernel = np.outer(
+        np.exp(-np.arange(-half_w, half_w + 1) ** 2 / (2 * sigma**2)),
+        np.exp(-np.arange(-half_w, half_w + 1) ** 2 / (2 * sigma**2)),
+    )
+
+    gaussian_kernel /= np.sum(gaussian_kernel)
+    gaussian_kernel = gaussian_kernel[: w1.shape[0], : w1.shape[1]]
+
+    diff = (w1 - w2) ** 2
+    dist = 0
+    for c in range(3):
+        dist += np.sum(diff[:, :, c] * gaussian_kernel)
+    dist = np.sqrt(dist / 3)
+    return dist
+
+
 def epipolarCorrespondence(im1, im2, F, x1, y1):
     # Replace pass by your implementation
-    pass
+    # if len(im1.shape) == 3:
+    #     im1 = cv2.cvtColor(im1, cv2.COLOR_RGB2GRAY)
+    # if len(im2.shape) == 3:
+    #     im2 = cv2.cvtColor(im2, cv2.COLOR_RGB2GRAY)
+
+    im1 = im1.astype(float)
+    im2 = im2.astype(float)
+    # for c in range(3):
+    #     im1[:, :, c] = cv2.GaussianBlur(im1[:, :, c], (5, 5), 0)
+    #     im2[:, :, c] = cv2.GaussianBlur(im2[:, :, c], (5, 5), 0)
+
+    # Normalize intensity per channel (reduce lighting effects)
+    for c in range(3):
+        im1[:, :, c] -= np.mean(im1[:, :, c])
+        im2[:, :, c] -= np.mean(im2[:, :, c])
+        im1[:, :, c] /= 255.0
+        im2[:, :, c] /= 255.0
+
+    window_size = 11
+    search_range = 75
+    delta = 5
+
+    # H, W = im1.shape[:2]
+    # im1 = im1.astype(np.float32)
+    # im1 -= np.mean(im1)
+    # im1 /= 255.0
+    # im2 = im2.astype(np.float32)
+    # im2 -= np.mean(im2)
+    # im2 /= 255.0
+
+    # Calculate the epipolar line in im2
+    H, W = im2.shape[:2]
+    l = F @ np.array([x1, y1, 1])
+    a, b, c = l
+
+    best_x2, best_y2 = 0, 0
+    min_dist = float("inf")
+    # lambda_dist = 0.000001  # Weight for displacement penalty
+
+    for x2 in range(max(0, int(x1 - search_range)), min(W, int(x1 + search_range))):
+        y2_base = -(a * x2 + c) / b
+
+        for dy in range(-delta, delta + 1):
+            y2 = int(y2_base + dy)
+            if y2 < 0 or y2 >= H:
+                continue
+            dist = sim(im1, im2, x1, y1, x2, y2, window_size)
+            # dist += lambda_dist * abs(y2 - y2_base)  # Add displacement penalty
+            if dist < min_dist:
+                min_dist = dist
+                best_x2, best_y2 = x2, y2
+
+    return best_x2, best_y2
 
 
 """
