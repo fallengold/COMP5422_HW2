@@ -69,6 +69,7 @@ for i, M2 in enumerate(C2s):
 
         if p1[2] > 0 and p2[2] > 0:
             in_front += 1
+    print(M2)
     print(f"M2 {i}: {in_front} points in front of both cameras")
 
     if in_front > max_in_front or (in_front == max_in_front and err < best_err):
@@ -78,9 +79,9 @@ for i, M2 in enumerate(C2s):
         best_P = P
         best_err = err
 
-np.savez("homework/q2.3_3.npz", M2=best_M2, C2=best_C2, P=best_P)
+np.savez("homework/q2.3_3.npz", M2=best_M2, C1=C1, C2=best_C2, P=best_P)
 print("Best M2: ", best_M2)
 print("Best C2: ", best_C2)
 print("Points number in front of both cameras: ", max_in_front)
-print("Best P: ", best_P)
+# print("Best P: ", best_P)
 print("Best reprojection error: ", best_err)

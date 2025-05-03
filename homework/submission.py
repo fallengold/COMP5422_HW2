@@ -6,9 +6,13 @@ Replace 'pass' by your implementation.
 # Insert your package here
 import cv2
 import numpy as np
-from homework.helper import refineF
+from homework.helper import getAbsoluteScale, camera2
 from skimage.measure import ransac
 from skimage.transform import FundamentalMatrixTransform
+from scipy.ndimage import gaussian_filter
+import os
+import matplotlib.pyplot as plt
+from tqdm import tqdm
 
 
 def find_matched_points(im1, im2, output_image_path="matches.jpg"):
@@ -202,103 +206,217 @@ Q2.4.1: 3D visualization of the temple images.
 """
 
 
-def sim(im1, im2, x1, y1, x2, y2, window_size):
-    # Replace pass by your implementation
-    sigma = window_size / 4
-
-    half_w = window_size // 2
-    x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
-
-    y1_start = max(0, y1 - half_w)
-    y1_end = min(im1.shape[0], y1 + half_w + 1)
-    x1_start = max(0, x1 - half_w)
-    x1_end = min(im1.shape[1], x1 + half_w + 1)
-
-    y2_start = max(0, y2 - half_w)
-    y2_end = min(im2.shape[0], y2 + half_w + 1)
-    x2_start = max(0, x2 - half_w)
-    x2_end = min(im2.shape[1], x2 + half_w + 1)
-
-    # Adjust boundaries to ensure same size
-    y_start = max(y1_start, y2_start)
-    y_end = min(y1_end, y2_end)
-    x_start = max(x1_start, x2_start)
-    x_end = min(x1_end, x2_end)
-
-    w1 = im1[y_start:y_end, x_start:x_end].astype(np.float32)
-    w2 = im2[y_start:y_end, x_start:x_end].astype(np.float32)
-
-    gaussian_kernel = np.outer(
-        np.exp(-np.arange(-half_w, half_w + 1) ** 2 / (2 * sigma**2)),
-        np.exp(-np.arange(-half_w, half_w + 1) ** 2 / (2 * sigma**2)),
-    )
-
-    gaussian_kernel /= np.sum(gaussian_kernel)
-    gaussian_kernel = gaussian_kernel[: w1.shape[0], : w1.shape[1]]
-
-    diff = (w1 - w2) ** 2
-    dist = 0
-    for c in range(3):
-        dist += np.sum(diff[:, :, c] * gaussian_kernel)
-    dist = np.sqrt(dist / 3)
-    return dist
+def compute_intersections(a, b, c, W, H):
+    intersections = []
+    eps = 1e-5
+    if abs(b) > eps:
+        y = (-c) / b
+        if 0 <= y < H:
+            intersections.append((0, y))
+    if abs(b) > eps:
+        y = (-a * (W - 1) - c) / b
+        if 0 <= y < H:
+            intersections.append((W - 1, y))
+    if abs(a) > eps:
+        x = (-c) / a
+        if 0 <= x < W:
+            intersections.append((x, 0))
+    if abs(a) > eps:
+        x = (-b * (H - 1) - c) / a
+        if 0 <= x < W:
+            intersections.append((x, H - 1))
+    intersections = list(set(intersections))
+    if len(intersections) < 2:
+        return []
+    sorted_pts = sorted(intersections, key=lambda p: (p[0], p[1]))
+    return [sorted_pts[0], sorted_pts[-1]]
 
 
 def epipolarCorrespondence(im1, im2, F, x1, y1):
-    # Replace pass by your implementation
-    # if len(im1.shape) == 3:
-    #     im1 = cv2.cvtColor(im1, cv2.COLOR_RGB2GRAY)
-    # if len(im2.shape) == 3:
-    #     im2 = cv2.cvtColor(im2, cv2.COLOR_RGB2GRAY)
+    PATCH_DIM = 15
+    GAUSS_SPREAD = 8.0
+    LINE_SAMPLING_RATIO = 1.0
+    MAX_DISPLACEMENT = 250
+    MIN_SEARCH_WIDTH = 20
 
-    im1 = im1.astype(float)
-    im2 = im2.astype(float)
-    # for c in range(3):
-    #     im1[:, :, c] = cv2.GaussianBlur(im1[:, :, c], (5, 5), 0)
-    #     im2[:, :, c] = cv2.GaussianBlur(im2[:, :, c], (5, 5), 0)
+    x1, y1 = int(round(x1)), int(round(y1))
+    H, W, _ = im2.shape
+    half = PATCH_DIM // 2
+    min_error = float("inf")
+    opt_match = (x1, y1)
 
-    # Normalize intensity per channel (reduce lighting effects)
-    for c in range(3):
-        im1[:, :, c] -= np.mean(im1[:, :, c])
-        im2[:, :, c] -= np.mean(im2[:, :, c])
-        im1[:, :, c] /= 255.0
-        im2[:, :, c] /= 255.0
+    kernel_1d = cv2.getGaussianKernel(PATCH_DIM, GAUSS_SPREAD)
+    base_kernel = kernel_1d @ kernel_1d.T
+    weighted_kernel = np.repeat(base_kernel[:, :, np.newaxis], 3, axis=2)
+    top_y, bottom_y = max(0, y1 - half), min(H, y1 + half + 1)
+    left_x, right_x = max(0, x1 - half), min(W, x1 + half + 1)
+    if (bottom_y - top_y) != PATCH_DIM or (right_x - left_x) != PATCH_DIM:
+        return opt_match
+    ref_patch = im1[top_y:bottom_y, left_x:right_x, :].astype(float)
+    src_point_homog = np.array([x1, y1, 1.0])
+    epi_line = F @ src_point_homog
+    line_a, line_b, line_c = epi_line[0], epi_line[1], epi_line[2]
 
-    window_size = 11
-    search_range = 75
-    delta = 5
+    line_ends = compute_intersections(line_a, line_b, line_c, W, H)
+    if not line_ends:
+        return opt_match
 
-    # H, W = im1.shape[:2]
-    # im1 = im1.astype(np.float32)
-    # im1 -= np.mean(im1)
-    # im1 /= 255.0
-    # im2 = im2.astype(np.float32)
-    # im2 -= np.mean(im2)
-    # im2 /= 255.0
+    start_x, start_y = line_ends[0]
+    end_x, end_y = line_ends[1]
+    epi_length = np.sqrt((end_x - start_x) ** 2 + (end_y - start_y) ** 2)
+    search_radius = max(int(epi_length * LINE_SAMPLING_RATIO), MIN_SEARCH_WIDTH)
+    possible_matches = []
+    param_t = np.linspace(0, 1, int(epi_length))
+    x_coords = start_x + param_t * (end_x - start_x)
+    y_coords = start_y + param_t * (end_y - start_y)
 
-    # Calculate the epipolar line in im2
-    H, W = im2.shape[:2]
-    l = F @ np.array([x1, y1, 1])
-    a, b, c = l
+    for x_val, y_val in zip(x_coords, y_coords):
+        offset = np.hypot(x_val - x1, y_val - y1)
+        if offset > search_radius:
+            continue
+        match_x = int(round(x_val))
+        match_y = int(round(y_val))
+        if abs(match_x - x1) > MAX_DISPLACEMENT or abs(match_y - y1) > MAX_DISPLACEMENT:
+            continue
+        if 0 <= match_x < W and 0 <= match_y < H:
+            possible_matches.append((match_x, match_y))
 
-    best_x2, best_y2 = 0, 0
-    min_dist = float("inf")
-    # lambda_dist = 0.000001  # Weight for displacement penalty
+    for match_x, match_y in possible_matches:
+        top_y, bottom_y = max(0, match_y - half), min(H, match_y + half + 1)
+        left_x, right_x = max(0, match_x - half), min(W, match_x + half + 1)
+        if (bottom_y - top_y) != PATCH_DIM or (right_x - left_x) != PATCH_DIM:
+            continue
+        cand_patch = im2[top_y:bottom_y, left_x:right_x, :].astype(float)
+        match_error = np.sum(weighted_kernel * (ref_patch - cand_patch) ** 2)
+        if match_error < min_error:
+            min_error = match_error
+            opt_match = (match_x, match_y)
 
-    for x2 in range(max(0, int(x1 - search_range)), min(W, int(x1 + search_range))):
-        y2_base = -(a * x2 + c) / b
+    return opt_match
 
-        for dy in range(-delta, delta + 1):
-            y2 = int(y2_base + dy)
-            if y2 < 0 or y2 >= H:
-                continue
-            dist = sim(im1, im2, x1, y1, x2, y2, window_size)
-            # dist += lambda_dist * abs(y2 - y2_base)  # Add displacement penalty
-            if dist < min_dist:
-                min_dist = dist
-                best_x2, best_y2 = x2, y2
 
-    return best_x2, best_y2
+# def sim(im1, im2, x1, y1, x2, y2, window_size):
+#     # Replace pass by your implementation
+#     sigma = 3.0
+
+#     half_w = window_size // 2
+#     x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
+
+#     y1_start = max(0, y1 - half_w)
+#     y1_end = min(im1.shape[0], y1 + half_w + 1)
+#     x1_start = max(0, x1 - half_w)
+#     x1_end = min(im1.shape[1], x1 + half_w + 1)
+
+#     y2_start = max(0, y2 - half_w)
+#     y2_end = min(im2.shape[0], y2 + half_w + 1)
+#     x2_start = max(0, x2 - half_w)
+#     x2_end = min(im2.shape[1], x2 + half_w + 1)
+
+#     # Adjust boundaries to ensure same size
+#     y_start = max(y1_start, y2_start)
+#     y_end = min(y1_end, y2_end)
+#     x_start = max(x1_start, x2_start)
+#     x_end = min(x1_end, x2_end)
+
+#     w1 = im1[y_start:y_end, x_start:x_end].astype(np.float32)
+#     w2 = im2[y_start:y_end, x_start:x_end].astype(np.float32)
+
+#     gaussian_kernel = np.outer(
+#         np.exp(-np.arange(-half_w, half_w + 1) ** 2 / (2 * sigma**2)),
+#         np.exp(-np.arange(-half_w, half_w + 1) ** 2 / (2 * sigma**2)),
+#     )
+
+#     gaussian_kernel /= np.sum(gaussian_kernel)
+#     gaussian_kernel = gaussian_kernel[: w1.shape[0], : w1.shape[1]]
+
+#     diff = (w1 - w2) ** 2
+#     dist = 0
+#     for c in range(3):
+#         dist += np.sum(diff[:, :, c] * gaussian_kernel)
+#     dist = np.sqrt(dist / 3)
+#     return dist
+
+
+# def epipolarCorrespondence(im1, im2, F, x1, y1):
+#     # Convert images to float
+#     im1 = im1.astype(float)
+#     im2 = im2.astype(float)
+
+#     # Get image dimensions
+#     H, W = im2.shape[:2]
+
+#     # Calculate the epipolar line in im2: l = F * [x1, y1, 1]
+#     l = F @ np.array([x1, y1, 1])
+#     a, b, c = l
+
+#     # Window size and delta for searching near the epipolar line
+#     window_size = 15
+#     delta = 3
+
+#     # Compute adaptive search range based on epipolar line
+#     # Find intersections of the epipolar line (ax + by + c = 0) with image boundaries
+#     x_min, x_max = 0, W - 1
+#     y_min, y_max = 0, H - 1
+
+#     # Points where the epipolar line intersects the image boundaries
+#     boundary_points = []
+#     # Left boundary (x = 0)
+#     if b != 0:
+#         y_left = -c / b
+#         if 0 <= y_left <= y_max:
+#             boundary_points.append((0, y_left))
+#     # Right boundary (x = W-1)
+#     if b != 0:
+#         y_right = -(a * (W - 1) + c) / b
+#         if 0 <= y_right <= y_max:
+#             boundary_points.append((W - 1, y_right))
+#     # Top boundary (y = 0)
+#     if a != 0:
+#         x_top = -c / a
+#         if 0 <= x_top <= x_max:
+#             boundary_points.append((x_top, 0))
+#     # Bottom boundary (y = H-1)
+#     if a != 0:
+#         x_bottom = -(b * (H - 1) + c) / a
+#         if 0 <= x_bottom <= x_max:
+#             boundary_points.append((x_bottom, H - 1))
+
+#     # If we have at least two boundary points, compute the search range
+#     if len(boundary_points) >= 2:
+#         x_coords = [p[0] for p in boundary_points]
+#         search_range = min(
+#             100, int(abs(max(x_coords) - min(x_coords)) / 2)
+#         )  # Cap at 100 pixels
+#     else:
+#         search_range = 100  # Fallback to default if line doesn't intersect well
+
+#     # Ensure search_range is at least a minimum value
+#     # search_range = max(50, search_range)
+
+#     # Initialize variables for best correspondence
+#     best_x2, best_y2 = 0, 0
+#     min_dist = float("inf")
+
+#     # Search for the best corresponding point
+#     for x2 in range(max(0, int(x1 - search_range)), min(W, int(x1 + search_range))):
+#         # Compute y2 based on the epipolar line: ax + by + c = 0 => y = -(ax + c)/b
+#         if b != 0:
+#             y2_base = -(a * x2 + c) / b
+#         else:
+#             continue  # Skip if epipolar line is vertical (rare case)
+
+#         # Search within delta pixels above and below the epipolar line
+#         for dy in range(-delta, delta + 1):
+#             y2 = int(y2_base + dy)
+#             if y2 < 0 or y2 >= H:
+#                 continue
+#             # Compute similarity (assuming sim function is defined elsewhere)
+#             dist = sim(im1, im2, x1, y1, x2, y2, window_size)
+#             if dist < min_dist:
+#                 min_dist = dist
+#                 best_x2, best_y2 = x2, y2
+
+#     return best_x2, best_y2
 
 
 """
@@ -314,20 +432,233 @@ Q3.1: Decomposition of the essential matrix to rotation and translation.
 
 
 def essentialDecomposition(im1, im2, k1, k2):
-    # Replace pass by your implementation
-    pass
+    pts1, pts2, _ = find_matched_points(im1, im2)
+    M = np.max([im1.shape[0], im1.shape[1], im2.shape[0], im2.shape[1]])
+    F = eightpoint(pts1, pts2, M)
+    E = essentialMatrix(F, k1, k2)
+    M2s = camera2(E)
+    M1 = np.hstack((np.eye(3), np.zeros((3, 1))))
+    C1 = k1 @ M1
+    best_R, best_t = None, None
+    best_count = 0
+    best_error = float("inf")
+    for i in range(4):
+        M2 = M2s[:, :, i]
+        C2 = k2 @ M2
+        P, err = triangulate(C1, pts1, C2, pts2)
+        front1 = P[:, 2] > 0
+        R = M2[:, :3]
+        t = M2[:, 3]
+        P_in_camera2 = np.zeros_like(P)
+        for j in range(P.shape[0]):
+            P_in_camera2[j] = R @ P[j] + t
+        front2 = P_in_camera2[:, 2] > 0
+        front = np.logical_and(front1, front2)
+        count = np.sum(front)
+        if count > best_count or (count == best_count and err < best_error):
+            best_count = count
+            best_error = err
+            best_R = R
+            best_t = t
+    return best_R, best_t
+
+
+# def essentialDecomposition(im1, im2, k1, k2):
+#     pts1, pts2, _ = find_matched_points(im1, im2)
+
+#     h1, w1 = im1.shape[:2]
+#     M = np.max([w1, h1])
+#     F = eightpoint(pts1, pts2, M)
+#     E = essentialMatrix(F, k1, k2)
+#     M2s = camera2(E)
+#     C1 = np.hstack((np.eye(3), np.zeros((3, 1))))
+#     C1 = k1 @ C1
+#     best_count = 0
+#     best_R = None
+#     best_t = None
+#     best_error = float("inf")
+
+#     for i in range(4):
+#         M2 = M2s[:, :, i]
+#         C2 = k2 @ M2
+#         P, err = triangulate(C1, pts1, C2, pts2)
+#         in_front_of_camera1 = P[:, 2] > 0
+#         R = M2[:, :3]
+#         t = M2[:, 3]
+#         P_in_camera2 = np.zeros_like(P)
+#         for j in range(P.shape[0]):
+#             P_in_camera2[j] = R @ P[j] + t
+#         in_front_of_camera2 = P_in_camera2[:, 2] > 0
+#         in_front_of_both = np.logical_and(in_front_of_camera1, in_front_of_camera2)
+#         count = np.sum(in_front_of_both)
+#         if count > best_count or (count == best_count and err < best_error):
+#             best_count = count
+#             best_error = err
+#             best_R = R
+#             best_t = t
+#     return best_R, best_t
+
+
+# def essentialDecomposition(im1, im2, k1, k2):
+#     # Replace pass by your implementation
+
+#     pts1, pts2, model = find_matched_points(im1, im2)
+
+#     M = np.max([im1.shape[0], im1.shape[1], im2.shape[0], im2.shape[1]])
+#     F = eightpoint(pts1, pts2, M)
+#     E = essentialMatrix(F, k1, k2)
+
+#     U, S, Vt = np.linalg.svd(E)
+#     S = np.array([1, 1, 0])
+#     E = U @ np.diag(S) @ Vt
+
+#     W = np.array([[0, -1, 0], [1, 0, 0], [0, 0, 1]])
+
+#     R1 = U @ W @ Vt
+#     R2 = U @ W.T @ Vt
+
+#     if np.linalg.det(R1) < 0:
+#         R1 = -R1
+#     if np.linalg.det(R2) < 0:
+#         R2 = -R2
+
+#     t = U[:, 2]
+#     t = t / np.linalg.norm(t)
+
+#     sols = [(R1, t), (R1, -t), (R2, t), (R2, -t)]
+
+#     # Camera matrices for
+#     M1 = k1 @ np.hstack((np.eye(3), np.zeros((3, 1))))
+#     best_R, best_t = None, None
+#     max_positive_depths = -1
+
+#     for R, t in sols:
+#         M2 = k1 @ np.hstack((R, t.reshape(-1, 1)))
+#         points_3d = triangulate(k1 @ M1, pts1, k2 @ M2, pts2)[0]
+#         positive_depths = np.sum(points_3d[:, 2] > 0)
+
+#         if positive_depths > max_positive_depths:
+#             max_positive_depths = positive_depths
+#             best_R, best_t = R, t
+
+#     return best_R, best_t
 
 
 """
 Q3.2: Implement a monocular visual odometry.
     Input:  datafolder, the folder of the provided monocular video sequence
             GT_pose, the provided ground-truth (GT) pose for each frame
-            plot=True, draw the estimated and the GT camera trajectories in the same plot
-    Output: trajectory, the estimated camera trajectory (with scale aligned)        
+            plot=True, draw the estimated and the GT camera trajectories in the same plot Output: trajectory, the estimated camera trajectory (with scale aligned)        
 
 """
 
 
 def visualOdometry(datafolder, GT_Pose, plot=True):
     # Replace pass by your implementation
-    pass
+
+    def load_intrinsics(file_path):
+        with open(file_path, "r") as f:
+            lines = f.readlines()
+            K = np.array(
+                [list(map(float, line.split())) for line in lines if line.strip()]
+            )
+            K1 = K[0].reshape(3, 3)
+            K2 = K[1].reshape(3, 3)
+
+        return K1, K2
+
+    K1, K2 = load_intrinsics("data/COMP5422_HW2_DATA/Intrinsic4Recon.npz")
+
+    gt_pose = GT_Pose  ## N x 3 x 4
+    image_files = sorted(
+        [f for f in os.listdir(datafolder) if f.endswith(".jpg")],
+        key=lambda x: int(x.split(".")[0]),
+    )
+
+    num_frames = len(image_files)
+    images = []
+    for files in image_files:
+        img = cv2.imread(os.path.join(datafolder, files))
+        images.append(img)
+
+    # max_num = 50
+    # images = images[:max_num]
+    # gt_pose = gt_pose[:max_num]
+    # num_frames = len(images)
+
+    trajectory = np.zeros((num_frames, 3, 4))
+    trajectory[0] = np.eye(3, 4)
+
+    current_pose = np.eye(3, 4)
+
+    iterable = tqdm(range(1, num_frames - 1), desc="Processing frames", unit="frame")
+    gt_translations = gt_pose[:, :3, 3]
+    for i in iterable:
+        im1 = images[i - 1]
+        im2 = images[i]
+
+        R_rel, t_rel = essentialDecomposition(im1, im2, K1, K2)
+        R_rel = R_rel.T
+        t_rel = t_rel * -1
+
+        cur_gt_pose = gt_pose[i].reshape(3, 4)
+        prev_gt_pose = gt_pose[i - 1].reshape(3, 4)
+
+        cur_gt_trans = cur_gt_pose[:, 3]
+        prev_gt_trans = prev_gt_pose[:, 3]
+
+        scale = getAbsoluteScale(prev_gt_trans, cur_gt_trans)
+        t_rel_scaled = scale * (current_pose[:3, :3] @ t_rel)
+        current_pose[:3, 3] += t_rel_scaled
+        current_pose[:3, :3] = R_rel @ current_pose[:3, :3]
+
+        print(f"scale {scale}")
+        print(f"My t_update:\n {t_rel_scaled}")
+        print(f"GT t_update:\n {gt_translations[i + 1] - gt_translations[i]}")
+        print("R_rel: ", R_rel)
+        print("t_rel: ", t_rel)
+
+        trajectory[i] = current_pose
+
+    est_translations = trajectory[:, :3, 3]
+
+    np.savez("q3_2.npz", trajectory=trajectory)
+    print("Saved trajectory to q3_2.npz")
+
+    # Visualize trajectories
+    if plot:
+        fig = plt.figure(figsize=(10, 8))
+        ax = fig.add_subplot(111, projection="3d")
+
+        # Plot estimated trajectory
+        ax.plot(
+            est_translations[:, 0],
+            est_translations[:, 1],
+            est_translations[:, 2],
+            label="Estimated Trajectory",
+            color="blue",
+            marker="o",
+        )
+        # Plot GT trajectory
+        ax.plot(
+            gt_translations[:, 0],
+            gt_translations[:, 1],
+            gt_translations[:, 2],
+            label="Ground Truth Trajectory",
+            color="red",
+            marker="x",
+        )
+
+        # Set labels
+        ax.set_xlabel("X")
+        ax.set_ylabel("Y")
+        ax.set_zlabel("Z")
+        ax.set_title("Estimated vs Ground Truth Camera Trajectories")
+        ax.legend()
+
+        # Save plot
+        plt.savefig("trajectory_plot.png")
+        print("Saved trajectory plot to trajectory_plot.png")
+        plt.show()
+
+    return trajectory

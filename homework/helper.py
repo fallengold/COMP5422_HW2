@@ -164,7 +164,7 @@ def epipolarMatchGUI(I1, I2, F):
             ys = -(l[0] * xs + l[2]) / l[1]
 
         ax1.plot(x, y, "*", markersize=6, linewidth=2)
-        ax2.plot([xs, xe], [ys, ye], linewidth=2)
+        # ax2.plot([xs, xe], [ys, ye], linewidth=2)
 
         # draw points
         x2, y2 = sub.epipolarCorrespondence(I1, I2, F, xc, yc)
