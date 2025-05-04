@@ -137,6 +137,7 @@ def epipolarMatchGUI(I1, I2, F):
     )
     ax2.set_axis_off()
 
+    pts1, pts2 = [], []
     while True:
         plt.sca(ax1)
         x, y = plt.ginput(1, mouse_stop=2)[0]
@@ -164,11 +165,17 @@ def epipolarMatchGUI(I1, I2, F):
             ys = -(l[0] * xs + l[2]) / l[1]
 
         ax1.plot(x, y, "*", markersize=6, linewidth=2)
-        # ax2.plot([xs, xe], [ys, ye], linewidth=2)
+        ax2.plot([xs, xe], [ys, ye], linewidth=2)
 
         # draw points
         x2, y2 = sub.epipolarCorrespondence(I1, I2, F, xc, yc)
         ax2.plot(x2, y2, "ro", markersize=8, linewidth=2)
+        pts1.append([xc, yc])
+        pts2.append([x2, y2])
+        pts1_arr = np.array(pts1).reshape(-1, 2)
+        pts2_arr = np.array(pts2).reshape(-1, 2)
+        save_dict = {"pts1": pts1_arr, "pts2": pts2_arr, "F": F}
+        np.savez("homework/q2.4_1.npz", **save_dict)
         plt.draw()
 
 

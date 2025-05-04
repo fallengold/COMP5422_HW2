@@ -118,5 +118,5 @@ for i, (elev, azim) in enumerate(views):
     print(f"Saved 3d_view_{i+1}.png (elev={elev}, azim={azim})")
 plt.show()
 # Save F, C1, C2 to q2.4_2.npz
-np.savez("q2.4_2.npz", F=F, C1=C1, C2=C2)
+np.savez("homework/q2.4_2.npz", F=F, C1=C1, C2=C2)
 print("Saved F, C1, C2 to q2.4_2.npz")

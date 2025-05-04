@@ -18,24 +18,44 @@ if __name__ == "__main__":
         if all(b not in f for b in BLACKLIST):
             files.append(f)
 
-    if "homework/results.pdf" not in files:
-        print("Warning: no results file found!")
-        raise SystemExit(
-            "Please make sure you put your results in ./homework/results.pdf as instructed!!!"
-        )
+    # if "homework/results.pdf" not in files:
+    #     print("Warning: no results file found!")
+    #     raise SystemExit(
+    #         "Please make sure you put your results in ./homework/results.pdf as instructed!!!"
+    #     )
+    print(files)
 
-    if (
-        "homework/q2.2_1.npz"
-        or "homework/q2.2_2.npz"
-        or "homework/q2.3_3.npz"
-        or "homework/q2.4_1.npz"
-        or "homework/q2.4_2.npz"
-        or "homework/q3_2.npz" not in files
-    ):
-        print("Warning: no results file found!")
-        raise SystemExit(
-            "Please make sure you put your .npz output files under ./homework as instructed!!!"
-        )
+    checklist = [
+        "homework/q2.2_1.npz",
+        "homework/q2.2_2.npz",
+        "homework/q2.3_3.npz",
+        "homework/q2.4_1.npz",
+        "homework/q2.4_2.npz",
+        "homework/q3_2.npz",
+    ]
+
+    for f in checklist:
+        print(f)
+        if f not in files:
+            print(f"Warning: {f} not found!")
+            raise SystemExit(
+                "Please make sure you put your .npz output files under ./homework as instructed!!!"
+            )
+        else:
+            print(f"{f} found!")
+
+    # if (
+    #     "homework/q2.2_1.npz"
+    #     or "homework/q2.2_2.npz"
+    #     or "homework/q2.3_3.npz"
+    #     or "homework/q2.4_1.npz"
+    #     or "homework/q2.4_2.npz"
+    #     or "homework/q3_2.npz" not in files
+    # ):
+    #     print("Warning: no results file found!")
+    #     raise SystemExit(
+    #         "Please make sure you put your .npz output files under ./homework as instructed!!!"
+    #     )
 
     zf = zipfile.ZipFile(args.utid + ".zip", "w", compression=zipfile.ZIP_DEFLATED)
     for f in files:

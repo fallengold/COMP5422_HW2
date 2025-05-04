@@ -295,130 +295,6 @@ def epipolarCorrespondence(im1, im2, F, x1, y1):
     return opt_match
 
 
-# def sim(im1, im2, x1, y1, x2, y2, window_size):
-#     # Replace pass by your implementation
-#     sigma = 3.0
-
-#     half_w = window_size // 2
-#     x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
-
-#     y1_start = max(0, y1 - half_w)
-#     y1_end = min(im1.shape[0], y1 + half_w + 1)
-#     x1_start = max(0, x1 - half_w)
-#     x1_end = min(im1.shape[1], x1 + half_w + 1)
-
-#     y2_start = max(0, y2 - half_w)
-#     y2_end = min(im2.shape[0], y2 + half_w + 1)
-#     x2_start = max(0, x2 - half_w)
-#     x2_end = min(im2.shape[1], x2 + half_w + 1)
-
-#     # Adjust boundaries to ensure same size
-#     y_start = max(y1_start, y2_start)
-#     y_end = min(y1_end, y2_end)
-#     x_start = max(x1_start, x2_start)
-#     x_end = min(x1_end, x2_end)
-
-#     w1 = im1[y_start:y_end, x_start:x_end].astype(np.float32)
-#     w2 = im2[y_start:y_end, x_start:x_end].astype(np.float32)
-
-#     gaussian_kernel = np.outer(
-#         np.exp(-np.arange(-half_w, half_w + 1) ** 2 / (2 * sigma**2)),
-#         np.exp(-np.arange(-half_w, half_w + 1) ** 2 / (2 * sigma**2)),
-#     )
-
-#     gaussian_kernel /= np.sum(gaussian_kernel)
-#     gaussian_kernel = gaussian_kernel[: w1.shape[0], : w1.shape[1]]
-
-#     diff = (w1 - w2) ** 2
-#     dist = 0
-#     for c in range(3):
-#         dist += np.sum(diff[:, :, c] * gaussian_kernel)
-#     dist = np.sqrt(dist / 3)
-#     return dist
-
-
-# def epipolarCorrespondence(im1, im2, F, x1, y1):
-#     # Convert images to float
-#     im1 = im1.astype(float)
-#     im2 = im2.astype(float)
-
-#     # Get image dimensions
-#     H, W = im2.shape[:2]
-
-#     # Calculate the epipolar line in im2: l = F * [x1, y1, 1]
-#     l = F @ np.array([x1, y1, 1])
-#     a, b, c = l
-
-#     # Window size and delta for searching near the epipolar line
-#     window_size = 15
-#     delta = 3
-
-#     # Compute adaptive search range based on epipolar line
-#     # Find intersections of the epipolar line (ax + by + c = 0) with image boundaries
-#     x_min, x_max = 0, W - 1
-#     y_min, y_max = 0, H - 1
-
-#     # Points where the epipolar line intersects the image boundaries
-#     boundary_points = []
-#     # Left boundary (x = 0)
-#     if b != 0:
-#         y_left = -c / b
-#         if 0 <= y_left <= y_max:
-#             boundary_points.append((0, y_left))
-#     # Right boundary (x = W-1)
-#     if b != 0:
-#         y_right = -(a * (W - 1) + c) / b
-#         if 0 <= y_right <= y_max:
-#             boundary_points.append((W - 1, y_right))
-#     # Top boundary (y = 0)
-#     if a != 0:
-#         x_top = -c / a
-#         if 0 <= x_top <= x_max:
-#             boundary_points.append((x_top, 0))
-#     # Bottom boundary (y = H-1)
-#     if a != 0:
-#         x_bottom = -(b * (H - 1) + c) / a
-#         if 0 <= x_bottom <= x_max:
-#             boundary_points.append((x_bottom, H - 1))
-
-#     # If we have at least two boundary points, compute the search range
-#     if len(boundary_points) >= 2:
-#         x_coords = [p[0] for p in boundary_points]
-#         search_range = min(
-#             100, int(abs(max(x_coords) - min(x_coords)) / 2)
-#         )  # Cap at 100 pixels
-#     else:
-#         search_range = 100  # Fallback to default if line doesn't intersect well
-
-#     # Ensure search_range is at least a minimum value
-#     # search_range = max(50, search_range)
-
-#     # Initialize variables for best correspondence
-#     best_x2, best_y2 = 0, 0
-#     min_dist = float("inf")
-
-#     # Search for the best corresponding point
-#     for x2 in range(max(0, int(x1 - search_range)), min(W, int(x1 + search_range))):
-#         # Compute y2 based on the epipolar line: ax + by + c = 0 => y = -(ax + c)/b
-#         if b != 0:
-#             y2_base = -(a * x2 + c) / b
-#         else:
-#             continue  # Skip if epipolar line is vertical (rare case)
-
-#         # Search within delta pixels above and below the epipolar line
-#         for dy in range(-delta, delta + 1):
-#             y2 = int(y2_base + dy)
-#             if y2 < 0 or y2 >= H:
-#                 continue
-#             # Compute similarity (assuming sim function is defined elsewhere)
-#             dist = sim(im1, im2, x1, y1, x2, y2, window_size)
-#             if dist < min_dist:
-#                 min_dist = dist
-#                 best_x2, best_y2 = x2, y2
-
-#     return best_x2, best_y2
-
-
 """
 Q3.1: Decomposition of the essential matrix to rotation and translation.
     Input:  im1, the first image
@@ -445,14 +321,14 @@ def essentialDecomposition(im1, im2, k1, k2):
     for i in range(4):
         M2 = M2s[:, :, i]
         C2 = k2 @ M2
-        P, err = triangulate(C1, pts1, C2, pts2)
-        front1 = P[:, 2] > 0
+        P1, err = triangulate(C1, pts1, C2, pts2)
+        front1 = P1[:, 2] > 0
         R = M2[:, :3]
         t = M2[:, 3]
-        P_in_camera2 = np.zeros_like(P)
-        for j in range(P.shape[0]):
-            P_in_camera2[j] = R @ P[j] + t
-        front2 = P_in_camera2[:, 2] > 0
+        P2 = np.zeros_like(P1)
+        for j in range(P1.shape[0]):
+            P2[j] = R @ P1[j] + t
+        front2 = P2[:, 2] > 0
         front = np.logical_and(front1, front2)
         count = np.sum(front)
         if count > best_count or (count == best_count and err < best_error):
@@ -461,87 +337,6 @@ def essentialDecomposition(im1, im2, k1, k2):
             best_R = R
             best_t = t
     return best_R, best_t
-
-
-# def essentialDecomposition(im1, im2, k1, k2):
-#     pts1, pts2, _ = find_matched_points(im1, im2)
-
-#     h1, w1 = im1.shape[:2]
-#     M = np.max([w1, h1])
-#     F = eightpoint(pts1, pts2, M)
-#     E = essentialMatrix(F, k1, k2)
-#     M2s = camera2(E)
-#     C1 = np.hstack((np.eye(3), np.zeros((3, 1))))
-#     C1 = k1 @ C1
-#     best_count = 0
-#     best_R = None
-#     best_t = None
-#     best_error = float("inf")
-
-#     for i in range(4):
-#         M2 = M2s[:, :, i]
-#         C2 = k2 @ M2
-#         P, err = triangulate(C1, pts1, C2, pts2)
-#         in_front_of_camera1 = P[:, 2] > 0
-#         R = M2[:, :3]
-#         t = M2[:, 3]
-#         P_in_camera2 = np.zeros_like(P)
-#         for j in range(P.shape[0]):
-#             P_in_camera2[j] = R @ P[j] + t
-#         in_front_of_camera2 = P_in_camera2[:, 2] > 0
-#         in_front_of_both = np.logical_and(in_front_of_camera1, in_front_of_camera2)
-#         count = np.sum(in_front_of_both)
-#         if count > best_count or (count == best_count and err < best_error):
-#             best_count = count
-#             best_error = err
-#             best_R = R
-#             best_t = t
-#     return best_R, best_t
-
-
-# def essentialDecomposition(im1, im2, k1, k2):
-#     # Replace pass by your implementation
-
-#     pts1, pts2, model = find_matched_points(im1, im2)
-
-#     M = np.max([im1.shape[0], im1.shape[1], im2.shape[0], im2.shape[1]])
-#     F = eightpoint(pts1, pts2, M)
-#     E = essentialMatrix(F, k1, k2)
-
-#     U, S, Vt = np.linalg.svd(E)
-#     S = np.array([1, 1, 0])
-#     E = U @ np.diag(S) @ Vt
-
-#     W = np.array([[0, -1, 0], [1, 0, 0], [0, 0, 1]])
-
-#     R1 = U @ W @ Vt
-#     R2 = U @ W.T @ Vt
-
-#     if np.linalg.det(R1) < 0:
-#         R1 = -R1
-#     if np.linalg.det(R2) < 0:
-#         R2 = -R2
-
-#     t = U[:, 2]
-#     t = t / np.linalg.norm(t)
-
-#     sols = [(R1, t), (R1, -t), (R2, t), (R2, -t)]
-
-#     # Camera matrices for
-#     M1 = k1 @ np.hstack((np.eye(3), np.zeros((3, 1))))
-#     best_R, best_t = None, None
-#     max_positive_depths = -1
-
-#     for R, t in sols:
-#         M2 = k1 @ np.hstack((R, t.reshape(-1, 1)))
-#         points_3d = triangulate(k1 @ M1, pts1, k2 @ M2, pts2)[0]
-#         positive_depths = np.sum(points_3d[:, 2] > 0)
-
-#         if positive_depths > max_positive_depths:
-#             max_positive_depths = positive_depths
-#             best_R, best_t = R, t
-
-#     return best_R, best_t
 
 
 """
@@ -588,38 +383,35 @@ def visualOdometry(datafolder, GT_Pose, plot=True):
 
     trajectory = np.zeros((num_frames, 3, 4))
     trajectory[0] = np.eye(3, 4)
-
     current_pose = np.eye(3, 4)
 
     iterable = tqdm(range(1, num_frames - 1), desc="Processing frames", unit="frame")
     gt_translations = gt_pose[:, :3, 3]
-    for i in iterable:
-        im1 = images[i - 1]
-        im2 = images[i]
+    try:
+        for i in iterable:
+            im1 = images[i - 1]
+            im2 = images[i]
 
-        R_rel, t_rel = essentialDecomposition(im1, im2, K1, K2)
-        R_rel = R_rel.T
-        t_rel = t_rel * -1
-
-        cur_gt_pose = gt_pose[i].reshape(3, 4)
-        prev_gt_pose = gt_pose[i - 1].reshape(3, 4)
-
-        cur_gt_trans = cur_gt_pose[:, 3]
-        prev_gt_trans = prev_gt_pose[:, 3]
-
-        scale = getAbsoluteScale(prev_gt_trans, cur_gt_trans)
-        t_rel_scaled = scale * (current_pose[:3, :3] @ t_rel)
-        current_pose[:3, 3] += t_rel_scaled
-        current_pose[:3, :3] = R_rel @ current_pose[:3, :3]
-
-        print(f"scale {scale}")
-        print(f"My t_update:\n {t_rel_scaled}")
-        print(f"GT t_update:\n {gt_translations[i + 1] - gt_translations[i]}")
-        print("R_rel: ", R_rel)
-        print("t_rel: ", t_rel)
-
-        trajectory[i] = current_pose
-
+            R_rel, t_rel = essentialDecomposition(im1, im2, K1, K2)
+            R_rel = R_rel.T
+            t_rel = t_rel * -1
+            cur_gt_pose = gt_pose[i].reshape(3, 4)
+            prev_gt_pose = gt_pose[i - 1].reshape(3, 4)
+            cur_gt_trans = cur_gt_pose[:, 3]
+            prev_gt_trans = prev_gt_pose[:, 3]
+            scale = getAbsoluteScale(prev_gt_trans, cur_gt_trans)
+            t_rel_scaled = scale * (current_pose[:3, :3] @ t_rel)
+            current_pose[:3, 3] += t_rel_scaled
+            current_pose[:3, :3] = R_rel @ current_pose[:3, :3]
+            # print(f"scale {scale}")
+            # print(f"estimated t_update:\n {t_rel_scaled}")
+            # print(f"GT t_update:\n {gt_translations[i + 1] - gt_translations[i]}")
+            print("R_rel: ", R_rel)
+            print("t_rel: ", t_rel)
+            trajectory[i] = current_pose
+    except Exception as e:
+        print(f"Error processing frame {i}: {e}")
+        pass
     est_translations = trajectory[:, :3, 3]
 
     np.savez("q3_2.npz", trajectory=trajectory)

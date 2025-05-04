@@ -39,4 +39,6 @@ save_dict = {
 np.savez("homework/q2.2_2.npz", **save_dict)
 # displayEpipolarF(img1, img2, F)
 
+
 epipolarMatchGUI(img1, img2, F)
+
